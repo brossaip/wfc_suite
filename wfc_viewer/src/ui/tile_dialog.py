@@ -110,14 +110,16 @@ class TileDialog(QDialog):
         cell_x: int,
         cell_y: int,
         valid_tiles: Optional[Set[str]] = None,
-        parent=None
+        parent=None,
+        conflict: str = ""
     ):
         super().__init__(parent)
-        
+
         self.atlas = atlas
         self.cell_x = cell_x
         self.cell_y = cell_y
         self.valid_tiles = valid_tiles or set()
+        self.conflict = conflict
         self.all_tiles = atlas.get_enabled_tile_ids()
         self._filter_valid = len(self.valid_tiles) > 0 and self.valid_tiles != self.all_tiles
         
@@ -189,8 +191,9 @@ class TileDialog(QDialog):
             self._filter_checkbox = None
             if not self.valid_tiles:
                 # Cross cell: no tile fits, picking one clears conflicting neighbors
-                note = QLabel("No tile fits the neighbors. Your pick will clear conflicting neighbors.")
-                note.setStyleSheet("color: #d08080; font-size: 11px;")
+                text = self.conflict or "No tile fits the neighbors. Your pick will clear conflicting neighbors."
+                note = QLabel(text)
+                note.setStyleSheet("color: #d08080; font-size: 11px; font-family: monospace;")
                 note.setWordWrap(True)
                 layout.addWidget(note)
 
@@ -298,15 +301,16 @@ class TileDialog(QDialog):
         cell_x: int,
         cell_y: int,
         valid_tiles: Optional[Set[str]] = None,
-        parent=None
+        parent=None,
+        conflict: str = ""
     ) -> Optional[str]:
         """
         Static method to show dialog and get selected tile.
-        
+
         Returns:
             tile_id if selected, empty string "" if cleared, None if cancelled
         """
-        dialog = TileDialog(atlas, cell_x, cell_y, valid_tiles, parent)
+        dialog = TileDialog(atlas, cell_x, cell_y, valid_tiles, parent, conflict)
         result = dialog.exec()
         
         if result == QDialog.Accepted:

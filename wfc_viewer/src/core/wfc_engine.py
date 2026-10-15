@@ -4,6 +4,7 @@ Wave Function Collapse engine with pause/resume support.
 
 import random
 from enum import Enum, auto
+from itertools import combinations
 from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 
@@ -40,6 +41,16 @@ class CellState:
         if self.is_collapsed:
             return 0
         return len(self.possibilities)
+
+
+@dataclass
+class NeighborConstraint:
+    """What one collapsed neighbour allows a cell to be."""
+    side: str
+    pos: Tuple[int, int]
+    tile_id: str
+    locked: bool
+    allowed: Set[str]  # tiles the cell may take because of this neighbour
 
 
 @dataclass
@@ -560,6 +571,63 @@ class WFCEngine(QObject):
         
         return valid
     
+    def get_neighbor_constraints(self, x: int, y: int) -> List[NeighborConstraint]:
+        """Constraint each collapsed neighbour puts on cell (x, y), in both adjacency directions."""
+        if self.atlas is None:
+            return []
+
+        constraints = []
+        for nx, ny, side in self._get_neighbors_with_sides(x, y):
+            neighbor = self.cells[(nx, ny)]
+            if not neighbor.is_collapsed:
+                continue
+
+            opposite = {'left': 'right', 'right': 'left',
+                       'top': 'bottom', 'bottom': 'top'}[side]
+            neighbor_allows = set(self.atlas.get_valid_neighbors(neighbor.collapsed_tile, opposite).keys())
+            i_allow = self.atlas.get_tiles_allowing_neighbor(side, neighbor.collapsed_tile)
+            constraints.append(NeighborConstraint(
+                side=side,
+                pos=(nx, ny),
+                tile_id=neighbor.collapsed_tile,
+                locked=neighbor.locked,
+                allowed=neighbor_allows & i_allow,
+            ))
+        return constraints
+
+    def find_minimal_conflict(self, x: int, y: int) -> List[NeighborConstraint]:
+        """Smallest group of neighbours whose constraints together leave no tile. Empty if none."""
+        constraints = self.get_neighbor_constraints(x, y)
+        for size in range(1, len(constraints) + 1):
+            for group in combinations(constraints, size):
+                if not set.intersection(*(c.allowed for c in group)):
+                    return list(group)
+        return []
+
+    def describe_conflict(self, x: int, y: int) -> str:
+        """Human-readable explanation of why cell (x, y) has no valid tile."""
+        constraints = self.get_neighbor_constraints(x, y)
+        if not constraints:
+            return f"Cell ({x}, {y}): no collapsed neighbours to blame."
+
+        lines = [f"Cell ({x}, {y}) has no valid tile.", "Neighbours:"]
+        for c in constraints:
+            tag = " [locked]" if c.locked else ""
+            permitted = sorted(c.allowed)
+            shown = ", ".join(permitted[:8]) + (", …" if len(permitted) > 8 else "")
+            lines.append(
+                f"  {c.side} ({c.pos[0]}, {c.pos[1]}): {c.tile_id}{tag} "
+                f"→ cell may be: {shown or 'none'}"
+            )
+
+        culprits = self.find_minimal_conflict(x, y)
+        if culprits:
+            names = " + ".join(f"{c.side} {c.tile_id} at ({c.pos[0]}, {c.pos[1]})" for c in culprits)
+            lines.append(f"Smallest conflicting set: {names}")
+        else:
+            lines.append("No direct neighbour conflict: the cause is an earlier choice further away.")
+        return "\n".join(lines)
+
     def validate_grid(self) -> List[str]:
         """
         Validate all adjacencies in the current grid.

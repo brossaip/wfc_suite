@@ -151,6 +151,10 @@ class MainWindow(QMainWindow):
         self._open_btn.clicked.connect(self._on_open_tr)
         toolbar.addWidget(self._open_btn)
         
+        self._load_initial_btn = QPushButton("📥 Initial .tm")
+        self._load_initial_btn.clicked.connect(self._on_load_initial_tm)
+        toolbar.addWidget(self._load_initial_btn)
+
         self._save_tm_btn = QPushButton("💾 Save .tm")
         self._save_tm_btn.clicked.connect(self._on_save_tm)
         toolbar.addWidget(self._save_tm_btn)
@@ -245,6 +249,7 @@ class MainWindow(QMainWindow):
         is_running = self._engine.state == EngineState.RUNNING
         is_idle_or_paused = self._engine.state in (EngineState.IDLE, EngineState.PAUSED)
         
+        self._load_initial_btn.setEnabled(has_atlas)
         self._save_tm_btn.setEnabled(has_atlas)
         self._export_png_btn.setEnabled(has_atlas)
         self._apply_size_btn.setEnabled(has_atlas)
@@ -350,6 +355,49 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to save file:\n{e}")
     
     @Slot()
+    def _on_load_initial_tm(self):
+        """Lock the cells of a .tm file as starting constraints, then restart the run."""
+        if self._atlas is None:
+            return
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Load Initial Cells from Tile Map",
+            "", "Tile Map (*.tm);;All Files (*)"
+        )
+        if not filepath:
+            return
+
+        try:
+            grid_state, _ = TMSaver.load(filepath)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load tile map:\n{e}")
+            return
+
+        width, height = self._engine.width, self._engine.height
+        enabled = self._atlas.get_enabled_tile_ids()
+        applied = skipped = 0
+
+        for (x, y), cell_data in grid_state.cells.items():
+            if not cell_data.tile_id:
+                continue
+            # Skip cells outside the current grid or using tiles not in the open .tr
+            if not (0 <= x < width and 0 <= y < height) or cell_data.tile_id not in enabled:
+                skipped += 1
+                continue
+            self._engine.lock_cell(x, y, cell_data.tile_id)
+            applied += 1
+
+        # Restart with the new locks in place (reset keeps locked cells)
+        self._engine.reset()
+        self._canvas.update_all_cells()
+
+        message = f"Loaded {applied} initial cells from {Path(filepath).name}"
+        if skipped:
+            message += f" ({skipped} skipped: outside grid or unknown tile)"
+        self._status_label.setText(message)
+        self._update_ui_state()
+
+    @Slot()
     def _on_export_png(self):
         if self._atlas is None:
             return
@@ -434,10 +482,11 @@ class MainWindow(QMainWindow):
         valid_tiles = self._engine.get_valid_tiles_for_cell(x, y)
         cell = self._engine.get_cell(x, y)
         is_cross = cell is not None and not cell.is_collapsed and len(cell.possibilities) == 0
+        conflict = self._engine.describe_conflict(x, y) if is_cross else ""
 
         # Show dialog
         result = TileDialog.get_tile(
-            self._atlas, x, y, valid_tiles, self
+            self._atlas, x, y, valid_tiles, self, conflict=conflict
         )
 
         if result is not None:

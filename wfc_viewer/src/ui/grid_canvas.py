@@ -140,11 +140,12 @@ class GridCanvas(QGraphicsView):
         item = self._cell_items.get((x, y))
         if item is None:
             return
-        
+
+        item.setToolTip("")
         cell = self._engine.get_cell(x, y)
         if cell is None:
             return
-        
+
         if cell.is_collapsed:
             # Get tile pixmap
             variant = self._atlas.tiles.get(cell.collapsed_tile)
@@ -162,6 +163,7 @@ class GridCanvas(QGraphicsView):
             # Show uncollapsed state
             if self._contradiction_pos == (x, y):
                 item.setBrush(QBrush(self._get_error_pixmap()))
+                item.setToolTip(self._engine.describe_conflict(x, y))
             else:
                 item.setBrush(QBrush(self._get_uncollapsed_pixmap()))
     
