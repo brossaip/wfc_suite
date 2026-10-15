@@ -20,7 +20,8 @@ class Atlas:
     # Runtime state (not serialized)
     file_path: Optional[str] = field(default=None, repr=False)
     modified: bool = field(default=False, repr=False)
-    
+    duplicates_merged: int = field(default=0, repr=False)
+
     # --- Base Tile Operations ---
     
     def add_base_tile(self, base_tile: BaseTile) -> None:
@@ -143,7 +144,18 @@ class Atlas:
         if removed > 0:
             self.modified = True
         return removed
-    
+
+    def merge_duplicate_rules(self) -> int:
+        """Keep one rule per (tile, side, neighbor); the last occurrence wins. Returns count removed."""
+        unique: dict = {}
+        for rule in self.rules:
+            unique[rule.key] = rule
+        removed = len(self.rules) - len(unique)
+        if removed > 0:
+            self.rules = list(unique.values())
+            self.modified = True
+        return removed
+
     # --- Serialization ---
     
     def to_dict(self) -> dict:

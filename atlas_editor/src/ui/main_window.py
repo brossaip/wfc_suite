@@ -328,7 +328,10 @@ class MainWindow(QMainWindow):
                 self._atlas = load_atlas(file_path)
                 self._update_title()
                 self._update_panels()
-                self.statusBar().showMessage(f"Opened {Path(file_path).name}", 3000)
+                message = f"Opened {Path(file_path).name}"
+                if self._atlas.duplicates_merged:
+                    message += f" (merged {self._atlas.duplicates_merged} duplicate rules)"
+                self.statusBar().showMessage(message, 3000)
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to open file: {e}")
     

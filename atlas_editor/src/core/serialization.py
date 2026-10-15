@@ -159,6 +159,9 @@ def load_atlas(file_path: Union[str, Path]) -> Atlas:
     atlas = Atlas.from_dict(data)
     atlas.file_path = str(file_path)
     atlas.modified = False
+
+    # Files may contain duplicate rules; keep one per key and offer to save the cleaned version
+    atlas.duplicates_merged = atlas.merge_duplicate_rules()
     
     # Store extraction directory for cleanup and for saving later
     atlas._extraction_dir = str(extract_dir)

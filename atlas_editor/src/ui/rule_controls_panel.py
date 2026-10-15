@@ -146,8 +146,7 @@ class SideSection(QFrame):
         self._atlas: Optional[Atlas] = None
         self._tile_id: Optional[str] = None
         self._get_image_fn = None
-        self._rows: Dict[str, NeighborRow] = {}
-        
+
         self.setStyleSheet("""
             SideSection {
                 background-color: #2d2d2d;
@@ -218,10 +217,13 @@ class SideSection(QFrame):
         return [t.id for t in self._atlas.get_tiles_for_base(tile.base_tile_id)]
     
     def _refresh(self):
-        for r in self._rows.values():
-            r.deleteLater()
-        self._rows.clear()
-        
+        # Remove every old row from the layout, including any not tied to a unique rule id
+        while self.neighbors_layout.count():
+            item = self.neighbors_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+                item.widget().deleteLater()
+
         if not self._atlas or not self._tile_id:
             self.total_lbl.setText("0%")
             self.warn_lbl.hide()
@@ -242,7 +244,6 @@ class SideSection(QFrame):
             row.remove_requested.connect(self._on_remove)
             row.variant_changed.connect(self._on_variant_changed)
             
-            self._rows[rule.neighbor_id] = row
             self.neighbors_layout.addWidget(row)
             total += rule.weight
         
