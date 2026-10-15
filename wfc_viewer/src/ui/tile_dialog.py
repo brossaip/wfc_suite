@@ -187,7 +187,13 @@ class TileDialog(QDialog):
             layout.addWidget(info)
         else:
             self._filter_checkbox = None
-        
+            if not self.valid_tiles:
+                # Cross cell: no tile fits, picking one clears conflicting neighbors
+                note = QLabel("No tile fits the neighbors. Your pick will clear conflicting neighbors.")
+                note.setStyleSheet("color: #d08080; font-size: 11px;")
+                note.setWordWrap(True)
+                layout.addWidget(note)
+
         # Scroll area for tiles
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -254,7 +260,7 @@ class TileDialog(QDialog):
                 continue
             
             btn = TileButton(variant, self.atlas)
-            btn.clicked.connect(lambda checked, tid=tile_id: self._on_tile_clicked(tid))
+            btn.clicked.connect(lambda tid=tile_id: self._on_tile_clicked(tid))
             
             # Disable if not valid (when showing all)
             if self._filter_checkbox and not self._filter_checkbox.isChecked():

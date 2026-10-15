@@ -432,16 +432,21 @@ class MainWindow(QMainWindow):
         
         # Get valid tiles for this position
         valid_tiles = self._engine.get_valid_tiles_for_cell(x, y)
-        
+        cell = self._engine.get_cell(x, y)
+        is_cross = cell is not None and not cell.is_collapsed and len(cell.possibilities) == 0
+
         # Show dialog
         result = TileDialog.get_tile(
             self._atlas, x, y, valid_tiles, self
         )
-        
+
         if result is not None:
             if result:  # tile_id selected (non-empty string)
-                self._engine.lock_cell(x, y, result)
-                self._canvas.update_cell(x, y)
+                if is_cross:
+                    self._engine.force_place(x, y, result)
+                else:
+                    self._engine.lock_cell(x, y, result)
+                self._canvas.update_all_cells()
             else:  # Clear requested (empty string "")
                 self._engine.unlock_cell(x, y)
                 self._canvas.update_cell(x, y)
@@ -494,7 +499,9 @@ class MainWindow(QMainWindow):
             else:
                 self._status_label.setText("Collapse complete! (valid)")
         else:
-            self._status_label.setText("Contradiction found!")
+            self._status_label.setText(
+                f"Contradiction after {self._engine.backtracks} retries. Click the ✖ cell to fix it."
+            )
         self._update_ui_state()
     
     def keyPressEvent(self, event):
