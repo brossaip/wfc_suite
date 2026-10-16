@@ -497,8 +497,13 @@ class MainWindow(QMainWindow):
                     self._engine.lock_cell(x, y, result)
                 self._canvas.update_all_cells()
             else:  # Clear requested (empty string "")
-                self._engine.unlock_cell(x, y)
-                self._canvas.update_cell(x, y)
+                cleared, locked = self._engine.clear_cell_and_forcing_neighbors(x, y)
+                self._canvas.update_all_cells()
+                if len(cleared) > 1:
+                    self._status_label.setText(
+                        f"Cleared {len(cleared)} cells to free ({x}, {y})"
+                        + (f", including {locked} locked" if locked else "")
+                    )
         # result is None = cancelled, do nothing
         
         # Resume if was running

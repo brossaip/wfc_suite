@@ -51,6 +51,8 @@ class NeighborConstraint:
     tile_id: str
     locked: bool
     allowed: Set[str]  # tiles the cell may take because of this neighbour
+    neighbor_permits: Set[str]  # tiles the neighbour allows on the side facing the cell
+    cell_permits: Set[str]  # tiles that list the neighbour on the side facing the neighbour
 
 
 @dataclass
@@ -214,6 +216,58 @@ class WFCEngine(QObject):
             if self.cells[(nx, ny)].is_collapsed:
                 self._propagate(nx, ny)
     
+    def clear_cell_and_forcing_neighbors(self, x: int, y: int) -> Tuple[List[Tuple[int, int]], int]:
+        """
+        Clear a cell so it can take a different tile. If its neighbours leave it at most one option,
+        also clear the fewest neighbours needed to free it. Cleared cells stay empty; propagation
+        does not refill them.
+        Returns (cleared positions, how many of them were locked).
+        """
+        if (x, y) not in self.cells or self.atlas is None:
+            return [], 0
+
+        enabled = self.atlas.get_enabled_tile_ids()
+        constraints = sorted(self.get_neighbor_constraints(x, y), key=lambda c: len(c.allowed))
+
+        def open_options(ignored: Set[Tuple[int, int]]) -> Set[str]:
+            options = set(enabled)
+            for c in constraints:
+                if c.pos not in ignored:
+                    options &= c.allowed
+            return options
+
+        ignored: Set[Tuple[int, int]] = set()
+        for c in constraints:
+            if len(open_options(ignored)) > 1:
+                break
+            ignored.add(c.pos)
+
+        to_clear = [(x, y)] + sorted(ignored)
+        locked_count = 0
+        for pos in to_clear:
+            cell = self.cells[pos]
+            if cell.is_collapsed:
+                self._collapsed_count -= 1
+            if cell.locked:
+                locked_count += 1
+            cell.locked = False
+            cell.collapsed_tile = None
+            cell.possibilities = set(enabled)
+
+        # Recompute options for every open cell from the placed cells that remain
+        for cell in self.cells.values():
+            if not cell.is_collapsed:
+                cell.possibilities = self.get_valid_tiles_for_cell(cell.x, cell.y)
+
+        self._clear_history()
+        if self.state in (EngineState.FINISHED, EngineState.CONTRADICTION):
+            self.state = EngineState.IDLE
+
+        for pos in to_clear:
+            self.cell_updated.emit(pos[0], pos[1])
+        self.progress_updated.emit(self._collapsed_count, self._total_cells)
+        return to_clear, locked_count
+
     def start(self):
         """Start or resume the collapse process."""
         if self.state in (EngineState.FINISHED, EngineState.CONTRADICTION):
@@ -584,16 +638,28 @@ class WFCEngine(QObject):
 
             opposite = {'left': 'right', 'right': 'left',
                        'top': 'bottom', 'bottom': 'top'}[side]
-            neighbor_allows = set(self.atlas.get_valid_neighbors(neighbor.collapsed_tile, opposite).keys())
-            i_allow = self.atlas.get_tiles_allowing_neighbor(side, neighbor.collapsed_tile)
+            neighbor_permits = set(self.atlas.get_valid_neighbors(neighbor.collapsed_tile, opposite).keys())
+            cell_permits = self.atlas.get_tiles_allowing_neighbor(side, neighbor.collapsed_tile)
             constraints.append(NeighborConstraint(
                 side=side,
                 pos=(nx, ny),
                 tile_id=neighbor.collapsed_tile,
                 locked=neighbor.locked,
-                allowed=neighbor_allows & i_allow,
+                allowed=neighbor_permits & cell_permits,
+                neighbor_permits=neighbor_permits,
+                cell_permits=cell_permits,
             ))
         return constraints
+
+    @staticmethod
+    def _missing_rule(c: NeighborConstraint) -> str:
+        """Which one-directional rule is absent for this neighbour, or '' if both directions have rules."""
+        opposite = {'left': 'right', 'right': 'left', 'top': 'bottom', 'bottom': 'top'}[c.side]
+        if not c.neighbor_permits:
+            return f"{c.tile_id} has no rules on its {opposite} side"
+        if not c.cell_permits:
+            return f"no tile has {c.tile_id} on its {c.side} side"
+        return ""
 
     def find_minimal_conflict(self, x: int, y: int) -> List[NeighborConstraint]:
         """Smallest group of neighbours whose constraints together leave no tile. Empty if none."""
@@ -624,6 +690,13 @@ class WFCEngine(QObject):
         if culprits:
             names = " + ".join(f"{c.side} {c.tile_id} at ({c.pos[0]}, {c.pos[1]})" for c in culprits)
             lines.append(f"Smallest conflicting set: {names}")
+            missing = [r for r in (self._missing_rule(c) for c in culprits) if r]
+            if missing:
+                lines.extend(f"Missing rule: {r}" for r in missing)
+            elif len(culprits) == 1:
+                lines.append(f"Missing rule: {culprits[0].tile_id}'s rules on its two sides disagree")
+            else:
+                lines.append("Missing rule: these neighbours have options, but none is shared by all")
         else:
             lines.append("No direct neighbour conflict: the cause is an earlier choice further away.")
         return "\n".join(lines)

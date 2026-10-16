@@ -2,6 +2,7 @@
 Zoomable, pannable grid canvas for WFC visualization.
 """
 
+from pathlib import Path
 from typing import Optional, Dict, Tuple
 
 from PySide6.QtWidgets import QWidget, QGraphicsView, QGraphicsScene, QGraphicsRectItem
@@ -151,6 +152,9 @@ class GridCanvas(QGraphicsView):
             variant = self._atlas.tiles.get(cell.collapsed_tile)
             if variant:
                 pixmap = variant.get_pixmap(self._atlas.base_tiles, self.CELL_SIZE)
+                base = self._atlas.base_tiles.get(variant.base_tile_id)
+                image_name = Path(base.source).name if base else "?"
+                item.setToolTip(f"{image_name}\n{variant.id}")
                 
                 # Add locked border if needed
                 if cell.locked:
