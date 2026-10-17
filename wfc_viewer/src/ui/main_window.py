@@ -242,6 +242,7 @@ class MainWindow(QMainWindow):
         self._engine.state_changed.connect(self._on_engine_state_changed)
         self._engine.progress_updated.connect(self._on_progress_updated)
         self._engine.finished.connect(self._on_collapse_finished)
+        self._engine.stuck.connect(self._on_stuck)
     
     def _update_ui_state(self):
         """Update UI enabled states based on current state."""
@@ -373,15 +374,21 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load tile map:\n{e}")
             return
 
-        width, height = self._engine.width, self._engine.height
+        # The tile map defines the grid size, so adopt it
+        width, height = grid_state.width, grid_state.height
+        self._width_spin.setValue(width)
+        self._height_spin.setValue(height)
+        self._engine.initialize(self._atlas, width, height)
+        self._canvas.setup_grid(width, height)
+
         enabled = self._atlas.get_enabled_tile_ids()
         applied = skipped = 0
 
         for (x, y), cell_data in grid_state.cells.items():
             if not cell_data.tile_id:
                 continue
-            # Skip cells outside the current grid or using tiles not in the open .tr
-            if not (0 <= x < width and 0 <= y < height) or cell_data.tile_id not in enabled:
+            # Skip tiles that are not in the open .tr
+            if cell_data.tile_id not in enabled:
                 skipped += 1
                 continue
             self._engine.lock_cell(x, y, cell_data.tile_id)
@@ -391,9 +398,9 @@ class MainWindow(QMainWindow):
         self._engine.reset()
         self._canvas.update_all_cells()
 
-        message = f"Loaded {applied} initial cells from {Path(filepath).name}"
+        message = f"Loaded {width}×{height} grid with {applied} initial cells from {Path(filepath).name}"
         if skipped:
-            message += f" ({skipped} skipped: outside grid or unknown tile)"
+            message += f" ({skipped} skipped: unknown tile)"
         self._status_label.setText(message)
         self._update_ui_state()
 
@@ -473,6 +480,9 @@ class MainWindow(QMainWindow):
         if self._atlas is None:
             return
         
+        # Tiles chosen while the run is paused (stuck or manual) become start points
+        was_paused = self._engine.state == EngineState.PAUSED
+
         # Pause if running
         was_running = self._engine.state == EngineState.RUNNING
         if was_running:
@@ -481,21 +491,26 @@ class MainWindow(QMainWindow):
         # Get valid tiles for this position
         valid_tiles = self._engine.get_valid_tiles_for_cell(x, y)
         cell = self._engine.get_cell(x, y)
-        is_cross = cell is not None and not cell.is_collapsed and len(cell.possibilities) == 0
+        is_cross = self._engine.is_cross(x, y)
         conflict = self._engine.describe_conflict(x, y) if is_cross else ""
 
         # Show dialog
         result = TileDialog.get_tile(
-            self._atlas, x, y, valid_tiles, self, conflict=conflict
+            self._atlas, x, y, valid_tiles, self, conflict=conflict,
+            explain=lambda tile_id: self._engine.explain_tile(x, y, tile_id)
         )
 
         if result is not None:
             if result:  # tile_id selected (non-empty string)
                 if is_cross:
-                    self._engine.force_place(x, y, result)
+                    self._engine.force_place(x, y, result, start_point=was_paused)
                 else:
-                    self._engine.lock_cell(x, y, result)
+                    self._engine.lock_cell(x, y, result, start_point=was_paused)
                 self._canvas.update_all_cells()
+                if was_paused:
+                    self._status_label.setText(
+                        f"Start point set at ({x}, {y}). Press Play to continue from there."
+                    )
             else:  # Clear requested (empty string "")
                 cleared, locked = self._engine.clear_cell_and_forcing_neighbors(x, y)
                 self._canvas.update_all_cells()
@@ -553,9 +568,18 @@ class MainWindow(QMainWindow):
             else:
                 self._status_label.setText("Collapse complete! (valid)")
         else:
+            crosses = len(self._engine.cross_positions())
             self._status_label.setText(
-                f"Contradiction after {self._engine.backtracks} retries. Click the ✖ cell to fix it."
+                f"Finished with {crosses} unresolved cell(s). Click a ✖ cell to fix it."
             )
+        self._update_ui_state()
+
+    @Slot(int, int)
+    def _on_stuck(self, x: int, y: int):
+        self._status_label.setText(
+            f"Stuck near ({x}, {y}) after {WFCEngine.STUCK_RETRIES} retries without progress. "
+            "Click an empty cell to mark a start point, then press Play."
+        )
         self._update_ui_state()
     
     def keyPressEvent(self, event):

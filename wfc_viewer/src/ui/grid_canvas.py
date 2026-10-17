@@ -74,8 +74,6 @@ class GridCanvas(QGraphicsView):
         self._uncollapsed_pixmap: Optional[QPixmap] = None
         self._error_pixmap: Optional[QPixmap] = None
         
-        # Contradiction position
-        self._contradiction_pos: Optional[Tuple[int, int]] = None
     
     def set_engine(self, engine: WFCEngine):
         """Connect to a WFC engine."""
@@ -96,7 +94,6 @@ class GridCanvas(QGraphicsView):
         """Setup the grid with given dimensions."""
         self._grid_width = width
         self._grid_height = height
-        self._contradiction_pos = None
         
         # Clear scene
         self._scene.clear()
@@ -165,7 +162,7 @@ class GridCanvas(QGraphicsView):
                 item.setBrush(QBrush(self._get_error_pixmap()))
         else:
             # Show uncollapsed state
-            if self._contradiction_pos == (x, y):
+            if self._engine.is_cross(x, y):
                 item.setBrush(QBrush(self._get_error_pixmap()))
                 item.setToolTip(self._engine.describe_conflict(x, y))
             else:
@@ -203,14 +200,12 @@ class GridCanvas(QGraphicsView):
         self.update_cell(x, y)
     
     def _on_contradiction(self, x: int, y: int):
-        """Handle contradiction signal."""
-        self._contradiction_pos = (x, y)
+        """Handle a cell being marked as a cross."""
         self.update_cell(x, y)
-    
+
     def _on_state_changed(self, state: EngineState):
         """Handle engine state change."""
         if state == EngineState.IDLE:
-            self._contradiction_pos = None
             self.update_all_cells()
     
     # === Input handling ===

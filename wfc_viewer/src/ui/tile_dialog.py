@@ -2,7 +2,7 @@
 Tile selector dialog for placing tiles on the grid.
 """
 
-from typing import Optional, Set
+from typing import Callable, Optional, Set
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, 
@@ -111,7 +111,8 @@ class TileDialog(QDialog):
         cell_y: int,
         valid_tiles: Optional[Set[str]] = None,
         parent=None,
-        conflict: str = ""
+        conflict: str = "",
+        explain: Optional[Callable[[str], str]] = None
     ):
         super().__init__(parent)
 
@@ -120,6 +121,7 @@ class TileDialog(QDialog):
         self.cell_y = cell_y
         self.valid_tiles = valid_tiles or set()
         self.conflict = conflict
+        self.explain = explain
         self.all_tiles = atlas.get_enabled_tile_ids()
         self._filter_valid = len(self.valid_tiles) > 0 and self.valid_tiles != self.all_tiles
         
@@ -269,6 +271,12 @@ class TileDialog(QDialog):
             if self._filter_checkbox and not self._filter_checkbox.isChecked():
                 if tile_id not in self.valid_tiles and self.valid_tiles:
                     btn.setEnabled(False)
+
+            # Say why an invalid tile is rejected here
+            if self.explain and tile_id not in self.valid_tiles:
+                reason = self.explain(tile_id)
+                if reason:
+                    btn.setToolTip(f"{btn.toolTip()}\n\nNot valid here:\n{reason}")
             
             self._tiles_layout.addWidget(btn, row, col)
             
@@ -302,7 +310,8 @@ class TileDialog(QDialog):
         cell_y: int,
         valid_tiles: Optional[Set[str]] = None,
         parent=None,
-        conflict: str = ""
+        conflict: str = "",
+        explain: Optional[Callable[[str], str]] = None
     ) -> Optional[str]:
         """
         Static method to show dialog and get selected tile.
@@ -310,7 +319,7 @@ class TileDialog(QDialog):
         Returns:
             tile_id if selected, empty string "" if cleared, None if cancelled
         """
-        dialog = TileDialog(atlas, cell_x, cell_y, valid_tiles, parent, conflict)
+        dialog = TileDialog(atlas, cell_x, cell_y, valid_tiles, parent, conflict, explain)
         result = dialog.exec()
         
         if result == QDialog.Accepted:
