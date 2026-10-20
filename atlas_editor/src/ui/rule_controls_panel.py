@@ -371,6 +371,8 @@ class RuleControlsPanel(QWidget):
     Panel with side sections for adding/editing adjacency rules.
     """
     rules_changed = Signal()
+    add_reverse_requested = Signal()
+    normalize_all_requested = Signal()
     neighbors_updated = Signal(str, list)  # side, neighbor_ids
     
     def __init__(self, parent: Optional[QWidget] = None):
@@ -429,6 +431,19 @@ class RuleControlsPanel(QWidget):
         """)
         self.normalize_btn.clicked.connect(self._on_normalize)
         layout.addWidget(self.normalize_btn)
+
+        # Atlas-wide actions (all tiles, not only the selected one)
+        self.add_reverse_btn = QPushButton("Add Reverse Rules (all tiles)")
+        self.add_reverse_btn.setStyleSheet(self.normalize_btn.styleSheet())
+        self.add_reverse_btn.setToolTip("Add the missing reverse of every one-way rule")
+        self.add_reverse_btn.clicked.connect(self.add_reverse_requested)
+        layout.addWidget(self.add_reverse_btn)
+
+        self.normalize_all_btn = QPushButton("Normalize All Tiles to 100%")
+        self.normalize_all_btn.setStyleSheet(self.normalize_btn.styleSheet())
+        self.normalize_all_btn.setToolTip("Normalize every side of every tile to 100%")
+        self.normalize_all_btn.clicked.connect(self.normalize_all_requested)
+        layout.addWidget(self.normalize_all_btn)
     
     def set_atlas(self, atlas: Optional[Atlas]) -> None:
         self._atlas = atlas

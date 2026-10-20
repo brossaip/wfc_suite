@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Optional
 
 from ..models import Atlas, Settings
-from ..core import save_atlas, load_atlas, propagate_all_rules, cleanup_extraction
+from ..core import (
+    save_atlas, load_atlas, propagate_all_rules, cleanup_extraction,
+    add_reciprocal_rules, normalize_all_weights,
+)
 from .tiles_panel import TilesPanel
 from .cross_preview_panel import CrossPreviewPanel
 from .rule_controls_panel import RuleControlsPanel
@@ -190,6 +193,10 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self._on_open)
         file_menu.addAction(open_action)
+
+        import_tiled_action = QAction("Import &Tiled Tileset...", self)
+        import_tiled_action.triggered.connect(lambda: self.tiles_panel.import_tiled_dialog())
+        file_menu.addAction(import_tiled_action)
         
         file_menu.addSeparator()
         
@@ -221,6 +228,16 @@ class MainWindow(QMainWindow):
         clear_auto_action = QAction("&Clear Auto-generated Rules", self)
         clear_auto_action.triggered.connect(self._on_clear_auto_rules)
         edit_menu.addAction(clear_auto_action)
+
+        edit_menu.addSeparator()
+
+        add_reverse_action = QAction("Add &Reverse Rules (all tiles)", self)
+        add_reverse_action.triggered.connect(self._on_add_reverse_rules)
+        edit_menu.addAction(add_reverse_action)
+
+        normalize_all_action = QAction("&Normalize All Tiles to 100%", self)
+        normalize_all_action.triggered.connect(self._on_normalize_all)
+        edit_menu.addAction(normalize_all_action)
     
     def _setup_connections(self):
         # Tiles panel -> other panels
@@ -232,6 +249,8 @@ class MainWindow(QMainWindow):
         
         # Rule controls -> Validation
         self.rule_controls_panel.rules_changed.connect(self._on_rules_changed)
+        self.rule_controls_panel.add_reverse_requested.connect(self._on_add_reverse_rules)
+        self.rule_controls_panel.normalize_all_requested.connect(self._on_normalize_all)
         
         # Validation -> Tiles panel
         self.validation_panel.tile_clicked.connect(self._on_validation_tile_clicked)
@@ -454,6 +473,40 @@ class MainWindow(QMainWindow):
             f"Generated {count} auto-propagated rules."
         )
     
+    def _on_add_reverse_rules(self):
+        """Add the missing reverse of every one-way rule in the atlas."""
+        if not self._atlas:
+            return
+
+        count = add_reciprocal_rules(self._atlas)
+        if count:
+            self._atlas.modified = True
+        self._update_title()
+        self.rule_controls_panel.refresh()
+        self.validation_panel.refresh()
+
+        QMessageBox.information(
+            self, "Reverse Rules",
+            f"Added {count} missing reverse rule(s)." if count else "No one-way rules found."
+        )
+
+    def _on_normalize_all(self):
+        """Normalize every side of every tile to 100%."""
+        if not self._atlas:
+            return
+
+        changed = normalize_all_weights(self._atlas)
+        if changed:
+            self._atlas.modified = True
+        self._update_title()
+        self.rule_controls_panel.refresh()
+        self.validation_panel.refresh()
+
+        QMessageBox.information(
+            self, "Normalize All Tiles",
+            f"Normalized {changed} side(s) to 100%." if changed else "All sides already total 100%."
+        )
+
     def _on_clear_auto_rules(self):
         """Clear all auto-generated rules."""
         if not self._atlas:

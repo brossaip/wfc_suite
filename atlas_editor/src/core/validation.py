@@ -116,7 +116,7 @@ def get_side_weight_total(atlas: 'Atlas', tile_id: str, side: str) -> float:
 
 def normalize_side_weights(atlas: 'Atlas', tile_id: str, side: str) -> None:
     """
-    Normalize weights for a tile's side so they sum to 100%.
+    Split a tile's side equally among its neighbours: each gets 100 / N percent.
     
     Args:
         atlas: The atlas
@@ -127,13 +127,29 @@ def normalize_side_weights(atlas: 'Atlas', tile_id: str, side: str) -> None:
     if not rules:
         return
     
-    total = sum(r.weight for r in rules)
-    if total <= 0:
-        return
-    
-    scale = 100.0 / total
+    equal = 100.0 / len(rules)
     for rule in rules:
-        rule.weight = rule.weight * scale
+        rule.weight = equal
     
     atlas.modified = True
+
+
+def normalize_all_weights(atlas: 'Atlas') -> int:
+    """
+    Split every tile's sides equally among their neighbours, not only the selected tile.
+
+    Returns:
+        Number of sides that were changed
+    """
+    changed = 0
+    for tile in atlas.tiles:
+        for side in SIDES:
+            rules = atlas.get_rules_for_tile(tile.id, side)
+            if not rules:
+                continue
+            equal = 100.0 / len(rules)
+            if any(abs(r.weight - equal) > 0.01 for r in rules):
+                normalize_side_weights(atlas, tile.id, side)
+                changed += 1
+    return changed
 

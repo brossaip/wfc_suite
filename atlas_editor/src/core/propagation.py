@@ -6,7 +6,7 @@ generate equivalent rules for all transformed variants of those tiles.
 """
 
 from typing import TYPE_CHECKING
-from .transform import Transform, SIDES, get_all_transforms
+from .transform import Transform, SIDES, get_all_transforms, get_opposite_side
 
 if TYPE_CHECKING:
     from ..models import Atlas, AdjacencyRule, Tile
@@ -188,3 +188,28 @@ def _transform_side_between(side: str, from_transform: Transform, to_transform: 
     
     # Apply to_transform to get the side in the new frame
     return to_transform.apply_to_side(original_side)
+
+
+def add_reciprocal_rules(atlas: 'Atlas') -> int:
+    """
+    Add the missing reverse of every one-way rule.
+
+    If A allows B on its right, B must allow A on its left. Each missing reverse
+    rule copies the forward rule's weight and is saved as a manual rule.
+
+    Returns:
+        Number of rules added
+    """
+    existing = {r.key for r in atlas.rules}
+    added = 0
+    for rule in list(atlas.rules):
+        reverse = (rule.neighbor_id, get_opposite_side(rule.side), rule.tile_id)
+        if reverse in existing:
+            continue
+        if atlas.get_tile(rule.tile_id) is None or atlas.get_tile(rule.neighbor_id) is None:
+            continue
+        atlas.add_rule(reverse[0], reverse[1], reverse[2], rule.weight, auto_generated=False)
+        existing.add(reverse)
+        added += 1
+    return added
+

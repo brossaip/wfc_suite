@@ -86,9 +86,11 @@ class WFCEngine(QObject):
     finished = Signal(bool)
     progress_updated = Signal(int, int)
     stuck = Signal(int, int)  # run paused: retries made no progress near (x, y)
+    auto_start = Signal(int, int)  # run stuck; continuing from the new start cell (x, y)
 
     MAX_BACKTRACKS = 2000
-    STUCK_RETRIES = 50  # retries without new progress before the run pauses
+    STUCK_RETRIES = 200  # retries without new progress before the run moves elsewhere
+    MAX_AUTO_JUMPS = 10  # automatic restarts without progress before the run pauses
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -112,6 +114,8 @@ class WFCEngine(QObject):
         self._best_collapsed = -1
         self._retries_since_best = 0
         self._starts: List[Tuple[int, int]] = []  # cells the user marked while paused
+        self._auto_start: Optional[Tuple[int, int]] = None  # start chosen automatically when stuck
+        self._jumps_since_best = 0
         self._start_dist: Dict[Tuple[int, int], int] = {}  # steps from the nearest start
 
     @property
@@ -151,6 +155,7 @@ class WFCEngine(QObject):
         self._collapsed_count = 0
         self._total_cells = width * height
         self._dead = set()
+        self._auto_start = None
         self._set_starts([])
         self._clear_history()
         
@@ -436,7 +441,7 @@ class WFCEngine(QObject):
                 continue
 
             if self._retries_since_best >= self.STUCK_RETRIES:
-                self._pause_stuck(pos)
+                self._on_stuck_episode(pos)
                 return
 
             if self._backtracks >= self.MAX_BACKTRACKS:
@@ -462,6 +467,43 @@ class WFCEngine(QObject):
         self.contradiction_found.emit(pos[0], pos[1])
         self.cell_updated.emit(pos[0], pos[1])
 
+    def _on_stuck_episode(self, pos: Tuple[int, int]):
+        """
+        Retries keep failing: continue from the most open free cell instead of waiting.
+        Pauses only when no free cell is left or restarts keep failing without progress.
+        """
+        target = None
+        if self._jumps_since_best < self.MAX_AUTO_JUMPS:
+            target = self._most_open_free_cell(exclude=pos)
+        if target is None:
+            self._pause_stuck(pos)
+            return
+
+        self._jumps_since_best += 1
+        self._history.clear()
+        self._backtracks = 0
+        self._retries_since_best = 0
+        starts = [p for p in self._starts if p != self._auto_start]
+        self._auto_start = target
+        self._set_starts(starts + [target])
+        self.auto_start.emit(target[0], target[1])
+
+    def _most_open_free_cell(self, exclude: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+        """Open cell with the most open neighbours, ties broken at random."""
+        best_score, ties = -1, []
+        for pos, cell in self.cells.items():
+            if cell.is_collapsed or pos in self._dead or pos == exclude or not cell.possibilities:
+                continue
+            score = sum(
+                1 for nx, ny, _ in self._get_neighbors_with_sides(*pos)
+                if not self.cells[(nx, ny)].is_collapsed and (nx, ny) not in self._dead
+            )
+            if score > best_score:
+                best_score, ties = score, [pos]
+            elif score == best_score:
+                ties.append(pos)
+        return random.choice(ties) if ties else None
+
     def _pause_stuck(self, pos: Tuple[int, int]):
         """Pause because retries keep failing without new progress; the user marks a new start cell."""
         self._timer.stop()
@@ -473,6 +515,7 @@ class WFCEngine(QObject):
         if self._collapsed_count > self._best_collapsed:
             self._best_collapsed = self._collapsed_count
             self._retries_since_best = 0
+            self._jumps_since_best = 0
 
     def is_cross(self, x: int, y: int) -> bool:
         """True if (x, y) is an open cell the run has given up on."""
@@ -507,6 +550,7 @@ class WFCEngine(QObject):
         self._backtracks = 0
         self._retries_since_best = 0
         self._best_collapsed = -1
+        self._jumps_since_best = 0
 
     def force_place(self, x: int, y: int, tile_id: str, start_point: bool = False):
         """

@@ -12,10 +12,12 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QImage, QAction, QCursor, QKeySequence, QShortcut
 from PIL import Image
 from pathlib import Path
+import re
 from typing import Optional, Dict, Set
 
 from ..models import Atlas, BaseTile, Tile
 from ..core import Transform
+from ..core.tiled_import import read_tileset
 from .widgets import TileThumbnail, CollapsibleSection
 
 
@@ -484,6 +486,66 @@ class TilesPanel(QWidget):
                 QMessageBox.critical(self, "Error", f"Failed: {e}")
             return False
     
+    def import_tiled_dialog(self) -> None:
+        if not self._atlas:
+            QMessageBox.warning(self, "No Atlas", "Create or open an atlas first.")
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Import Tiled Tileset",
+            "", "Tiled (*.tsx *.tmx *.tsj *.json);;All Files (*)"
+        )
+        if file_path:
+            self.import_tiled_tileset(file_path)
+
+    def import_tiled_tileset(self, file_path: str) -> None:
+        """Create one base tile per tile in a Tiled tileset; each tile is saved as a PNG beside it."""
+        if not self._atlas:
+            QMessageBox.warning(self, "No Atlas", "Create or open an atlas first.")
+            return
+        try:
+            tiles = read_tileset(file_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to read Tiled tileset:\n{e}")
+            return
+
+        source = Path(file_path)
+        out_dir = source.parent / f"{source.stem}_tiles"
+        out_dir.mkdir(exist_ok=True)
+
+        added = skipped = 0
+        for tile in tiles:
+            if self._atlas.get_base_tile(tile.id):
+                skipped += 1
+                continue
+            safe_name = re.sub(r"[^\w.-]", "_", tile.id)
+            image_path = out_dir / f"{safe_name}.png"
+            tile.image.save(image_path, "PNG")
+
+            relative_path = image_path
+            if self._atlas.file_path:
+                try:
+                    relative_path = image_path.relative_to(Path(self._atlas.file_path).parent)
+                except ValueError:
+                    pass
+
+            self._atlas.add_base_tile(BaseTile(
+                id=tile.id,
+                source_path=str(relative_path),
+                width=tile.image.width,
+                height=tile.image.height,
+            ))
+            self._image_cache[tile.id] = tile.image.convert('RGBA')
+            added += 1
+
+        if added:
+            self._refresh_tiles()
+            self.atlas_modified.emit()
+
+        message = f"Imported {added} tile(s) from {source.name}."
+        if skipped:
+            message += f" Skipped {skipped} already in the atlas."
+        QMessageBox.information(self, "Tiled Tileset", message)
+
     def _get_first_selected_tile(self) -> Optional[Tile]:
         if not self._atlas or not self._selected_tile_ids:
             return None
